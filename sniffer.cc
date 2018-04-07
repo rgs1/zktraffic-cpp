@@ -66,9 +66,13 @@ void Sniffer::packetHandler(const struct pcap_pkthdr* header,  const u_char *pac
   // extract zk requests/replies
   unique_ptr<ZKMessage> message;
   if (tcpp->dst_port() == 2181) {
-    message = ZKClientMessage::from_payload(tcpp->payload());
+    auto client = tcpp->src();
+    auto server = tcpp->dst();
+    message = ZKClientMessage::from_payload(move(client), move(server), tcpp->payload());
   } else {
-    message = ZKServerMessage::from_payload(tcpp->payload());
+    auto server = tcpp->src();
+    auto client = tcpp->dst();
+    message = ZKServerMessage::from_payload(move(client), move(server), tcpp->payload());
   }
 
   // add to the queue

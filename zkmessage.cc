@@ -45,19 +45,31 @@ string read_buffer(const string& data, int offset) {
   return data.substr(offset + 4, length);
 }
 
-unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(const string& payload) {
+const int CONNECT_XID = 0;
+const int WATCH_XID = -1;
+const int PING_XID = -2;
+const int AUTH_XID = -4;
+const int SET_WATCHES_XID = -8;
+
+unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
+  string server, const string& payload) {
   int length = read_number(payload, 0);
   if (length < 0) {
     return nullptr;
   }
 
   int xid = read_number(payload, 4);
-
-  if (xid == 0) {
-    return ZKConnectRequest::from_payload(payload);
+  switch (xid) {
+  case CONNECT_XID:
+    return ConnectRequest::from_payload(move(client), move(server), payload);
+  case PING_XID:
+    return PingRequest::from_payload(move(client), move(server), payload);
+  case AUTH_XID:
+    return AuthRequest::from_payload(move(client), move(server), payload);
+  default:
+    break;
   }
 
-  // handle ping
   // handle get
   // handle create
   // handle set
@@ -66,14 +78,14 @@ unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(const string& payload)
   return nullptr;
 }
 
-unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(const string& payload) {
+unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(string client, string server, const string& payload) {
   // handle responses
   // handle watches firing
 
   return nullptr;
 }
 
-unique_ptr<ZKConnectRequest> ZKConnectRequest::from_payload(const string& payload) {
+unique_ptr<ConnectRequest> ConnectRequest::from_payload(string client, string server, const string& payload) {
   int length = read_number(payload, 0);
   if (length < 32) {
     return nullptr;
@@ -86,7 +98,32 @@ unique_ptr<ZKConnectRequest> ZKConnectRequest::from_payload(const string& payloa
   string passwd = read_buffer(payload, 28);
   bool readonly = read_bool(payload, 28 + 4 + passwd.length());
 
-  return make_unique<ZKConnectRequest>(protocol,zxid, timeout, session, move(passwd), readonly);
+  return make_unique<ConnectRequest>(move(client), move(server),
+    protocol,zxid, timeout, session, move(passwd), readonly);
+}
+
+unique_ptr<PingRequest> PingRequest::from_payload(string client, string server, const string& payload) {
+  return make_unique<PingRequest>(move(client), move(server));
+}
+
+void dump_payload(const string& payload) {
+  for (int i=0; i<payload.length(); i++)
+    cout << "payload[" << i << "] = " << payload[i] << "\n";
+}
+
+unique_ptr<AuthRequest> AuthRequest::from_payload(string client, string server, const string& payload) {
+  int length = read_number(payload, 0);
+  if (length < 24) {  // length(int) + xid(int) + opcode(int) + type(int) + scheme(int + str) + cred(int + auth)
+    return nullptr;
+  }
+
+  int opcode = read_number(payload, 8);
+  int type = read_number(payload, 12);
+  string scheme = read_buffer(payload, 16);
+  string cred = read_buffer(payload, 20 + scheme.length());
+
+  return make_unique<AuthRequest>(move(client), move(server),
+    type, move(scheme), move(cred));
 }
 
 }

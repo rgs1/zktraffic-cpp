@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "pcap.h"
@@ -22,6 +23,17 @@ public:
   const std::string& src_ip() const { return src_ip_; }
   const std::string& dst_ip() const { return dst_ip_; }
   const std::string& payload() const { return payload_; }
+  string src() const {
+    stringstream ss;
+    ss << src_ip_ << ":" << src_port_;
+    return move(ss.str());
+  }
+
+  string dst() {
+    stringstream ss;
+    ss << dst_ip_ << ":" << dst_port_;
+    return move(ss.str());
+  }
 
 private:
   int src_port_;
