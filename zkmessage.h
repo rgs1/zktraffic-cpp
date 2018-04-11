@@ -111,4 +111,28 @@ private:
   string credential_;
 };
 
+class GetRequest : public ZKClientMessage {
+public:
+  GetRequest(string client, string server, string path, bool watch) :
+    ZKClientMessage(std::move(client), std::move(server)),
+    path_(move(path)), watch_(watch) {};
+
+  static std::unique_ptr<GetRequest> from_payload(string, string, const string&);
+
+  operator std::string() const {
+    stringstream ss;
+    ss << "GetRequest(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  path=" << path_ << "\n" <<
+      "  watch=" << watch_ << "\n" <<
+      ")\n";
+    return ss.str();
+  };
+
+private:
+  string path_;
+  bool watch_;
+};
+
 }
