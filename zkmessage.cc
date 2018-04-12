@@ -140,11 +140,8 @@ unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
   case enumToInt(Opcodes::GETDATA):
     return GetRequest::from_payload(move(client), move(server), payload);
   case enumToInt(Opcodes::CREATE):
-    return CreateRequest::from_payload(move(client), move(server), payload);
-    break;
   case enumToInt(Opcodes::CREATE2):
-    cout << "got create2\n";
-    break;
+    return CreateRequest::from_payload(move(client), move(server), payload);
   case enumToInt(Opcodes::SETDATA):
     cout << "got setdata\n";
     break;
