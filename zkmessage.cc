@@ -13,8 +13,8 @@ namespace {
   if (read_number(P, 0) < MINL) return nullptr
 
 // https://commandcenter.blogspot.fr/2012/04/byte-order-fallacy.html
-int read_number(const string& data, int offset) {
-  if (offset >= data.length())
+int read_number(const string& data, unsigned int offset) {
+  if (offset + 4 > data.length())
     return -1;
 
   auto n = data.substr(offset, 4);
@@ -28,14 +28,14 @@ int read_number(const string& data, int offset) {
 
 int read_long(const string& data, int offset) {
   auto n = data.substr(offset, 8);
-  long long number = ((unsigned char)n[7]<<0) | \
-    ((unsigned char)n[6]<<8) | \
-    ((unsigned char)n[5]<<16) | \
-    ((unsigned char)n[4]<<24) | \
-    ((unsigned char)n[3]<<32) | \
-    ((unsigned char)n[2]<<40) | \
-    ((unsigned char)n[1]<<48) | \
-    ((unsigned char)n[0]<<56);
+  long long number = ((unsigned long long)n[7]<<0) | \
+    ((unsigned long long)n[6]<<8) | \
+    ((unsigned long long)n[5]<<16) | \
+    ((unsigned long long)n[4]<<24) | \
+    ((unsigned long long)n[3]<<32) | \
+    ((unsigned long long)n[2]<<40) | \
+    ((unsigned long long)n[1]<<48) | \
+    ((unsigned long long)n[0]<<56);
 
   return number;
 }
@@ -50,6 +50,30 @@ bool read_bool(const string& data, unsigned int offset) {
 string read_buffer(const string& data, int offset) {
   int length = read_number(data, offset);
   return data.substr(offset + 4, length);
+}
+
+pair<vector<Acl>, int> read_acls(const string& payload, int offset) {
+  vector<Acl> acls{};
+  int count = read_number(payload, offset);
+
+  offset += 4;
+
+  if (count < 0)
+    return pair<vector<Acl>, int>{acls, offset};
+
+  for (int i=0; i<count; i++) {
+    int perms = read_number(payload, offset);
+    offset += 4;
+    string scheme = read_buffer(payload, offset);
+    offset += 4 + scheme.length();
+    string credential = read_buffer(payload, offset);
+    offset += 4 + credential.length();
+
+    auto acl = Acl(perms, move(scheme), move(credential));
+    acls.push_back(move(acl));
+  }
+
+  return pair<vector<Acl>, int>{acls, offset};
 }
 
 const int CONNECT_XID = 0;
@@ -87,7 +111,7 @@ enum class Opcodes {
 };
 
 void dump_payload(const string& payload) {
-  for (int i=0; i<payload.length(); i++)
+  for (unsigned int i=0; i<payload.length(); i++)
     cout << "payload[" << i << "] = " << payload[i] << "\n";
 }
 
@@ -116,7 +140,7 @@ unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
   case enumToInt(Opcodes::GETDATA):
     return GetRequest::from_payload(move(client), move(server), payload);
   case enumToInt(Opcodes::CREATE):
-    cout << "got create\n";
+    return CreateRequest::from_payload(move(client), move(server), payload);
     break;
   case enumToInt(Opcodes::CREATE2):
     cout << "got create2\n";
@@ -187,11 +211,26 @@ unique_ptr<GetRequest> GetRequest::from_payload(string client, string server, co
   // xid(int) + opcode(int) + path(int + str) + watch(bool)
   CHECK_LENGTH(payload, 14);
 
-  int opcode = read_number(payload, 8);
   string path = read_buffer(payload, 12);
   bool watch = read_bool(payload, 12 + 4 + path.length());
 
   return make_unique<GetRequest>(move(client), move(server), move(path), watch);
+}
+
+unique_ptr<CreateRequest> CreateRequest::from_payload(string client, string server, const string& payload) {
+  // xid(int) + opcode(int) + path(int + str) + data(str) + acls(vector) + ephemeral(bool) + sequence(bool)
+  CHECK_LENGTH(payload, 25);
+
+  string path = read_buffer(payload, 12);
+  int data_len = read_number(payload, 16 + path.length());
+  auto acls_rv = read_acls(payload, 20 + path.length() + data_len);
+  auto acls = acls_rv.first;
+  int flags = read_number(payload, acls_rv.second);
+  bool ephemeral = (flags & 0x1) == 1;
+  bool sequence = (flags & 0x2) == 2;
+
+  return make_unique<CreateRequest>(move(client), move(server), move(path),
+    ephemeral, sequence, move(acls));
 }
 
 }

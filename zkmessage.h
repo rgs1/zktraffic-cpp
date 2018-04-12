@@ -4,10 +4,36 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace std;
 
 namespace Zktraffic {
+
+class Acl {
+public:
+  Acl(int perms, string scheme, string credential) :
+    perms_(perms), scheme_(move(scheme)), credential_(move(credential)) {};
+
+  operator std::string() const { return repr(true); }
+
+  string repr(bool newlines=false) const {
+    auto nl = newlines ? "\n" : "";
+    auto prefix = newlines ? "  " : "";
+    stringstream ss;
+    ss << "Acl(" <<  nl <<
+      prefix << "perms=" << perms_ << "," << nl <<
+      prefix << "scheme=" << scheme_ << "," << nl <<
+      prefix << "credential=" << credential_ << nl <<
+      ")" << nl;
+    return ss.str();
+  };
+
+private:
+  int perms_;
+  string scheme_;
+  string credential_;
+};
 
 class ZKMessage {
 public:
@@ -133,6 +159,48 @@ public:
 private:
   string path_;
   bool watch_;
+};
+
+class CreateRequest : public ZKClientMessage {
+public:
+  CreateRequest(string client, string server, string path,
+    bool ephemeral, bool sequence, vector<Acl> acls) :
+    ZKClientMessage(move(client), move(server)), path_(move(path)),
+    ephemeral_(ephemeral), sequence_(sequence), acls_(move(acls)) {};
+
+  static std::unique_ptr<CreateRequest> from_payload(string, string, const string&);
+
+  operator std::string() const {
+    auto ephemeral = ephemeral_ ? "true" : "false";
+    auto sequence = sequence_ ? "true" : "false";
+    stringstream ss;
+    ss << "CreateRequest(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  path=" << path_ << "\n" <<
+      "  ephemeral=" << ephemeral << "\n" <<
+      "  sequence=" << sequence << "\n" <<
+      "  acls=" << acls() << "\n" <<
+      ")\n";
+    return ss.str();
+  };
+
+private:
+  string acls() const {
+    bool first = true;
+    stringstream ss;
+    for (auto acl: acls_) {
+      if (!first)
+	ss << ",";
+      ss << acl.repr();
+      first = false;
+    }
+    return ss.str();
+  };
+  string path_;
+  bool ephemeral_;
+  bool sequence_;
+  vector<Acl> acls_;
 };
 
 }
