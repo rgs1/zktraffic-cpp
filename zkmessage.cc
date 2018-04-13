@@ -110,10 +110,55 @@ enum class Opcodes {
   SETWATCHES = 101
 };
 
+template <typename T>
+unique_ptr<T> from_payload_path_watch(string client, string server, const string& payload) {
+  // xid(int) + opcode(int) + path(int + str) + watch(bool)
+  CHECK_LENGTH(payload, 14);
+
+  string path = read_buffer(payload, 12);
+  bool watch = read_bool(payload, 12 + 4 + path.length());
+
+  return make_unique<T>(move(client), move(server), move(path), watch);
+}
+
+template <typename T>
+unique_ptr<T> from_payload_path_data_version(string client, string server, const string& payload) {
+  // xid(int) + opcode(int) + path(int + str) + data(str) + version(int)
+  CHECK_LENGTH(payload, 22);
+
+  string path = read_buffer(payload, 12);
+  int data_len = read_number(payload, 16 + path.length());
+  int version = read_number(payload, 20 + path.length() + data_len);
+
+  return make_unique<T>(move(client), move(server), move(path), version);
+}
+
+template <typename T>
+unique_ptr<T> from_payload_path_version(string client, string server, const string& payload) {
+  // xid(int) + opcode(int) + path(int + str) + version(int)
+  CHECK_LENGTH(payload, 17);
+
+  string path = read_buffer(payload, 12);
+  int version = read_number(payload, 16 + path.length());
+
+  return make_unique<T>(move(client), move(server), move(path), version);
+}
+
+template <typename T>
+unique_ptr<T> from_payload_path(string client, string server, const string& payload) {
+  // xid(int) + opcode(int) + path(int + str)
+  CHECK_LENGTH(payload, 17);
+  string path = read_buffer(payload, 12);
+
+  return make_unique<T>(move(client), move(server), move(path));
+}
+
+/*
 void dump_payload(const string& payload) {
   for (unsigned int i=0; i<payload.length(); i++)
     cout << "payload[" << i << "] = " << payload[i] << "\n";
 }
+*/
 
 } // namespace
 
@@ -127,7 +172,7 @@ unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
   case CONNECT_XID:
     return ConnectRequest::from_payload(move(client), move(server), payload);
   case PING_XID:
-    return PingRequest::from_payload(move(client), move(server), payload);
+    return make_unique<PingRequest>(move(client), move(server));
   case AUTH_XID:
     return AuthRequest::from_payload(move(client), move(server), payload);
   default:
@@ -138,28 +183,21 @@ unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
   int opcode = read_number(payload, 8);
   switch (opcode) {
   case enumToInt(Opcodes::GETDATA):
-    return GetRequest::from_payload(move(client), move(server), payload);
+    return from_payload_path_watch<GetRequest>(move(client), move(server), payload);
   case enumToInt(Opcodes::CREATE):
   case enumToInt(Opcodes::CREATE2):
     return CreateRequest::from_payload(move(client), move(server), payload);
   case enumToInt(Opcodes::SETDATA):
-    cout << "got setdata\n";
-    break;
+    return from_payload_path_data_version<SetRequest>(move(client), move(server), payload);
   case enumToInt(Opcodes::GETCHILDREN):
-    cout << "got getChildren\n";
-    break;
   case enumToInt(Opcodes::GETCHILDREN2):
-    cout << "got getChildren2\n";
-    break;
+    return from_payload_path_watch<GetChildrenRequest>(move(client), move(server), payload);
   case enumToInt(Opcodes::DELETE):
-    cout << "got delete\n";
-    break;
+    return from_payload_path_version<DeleteRequest>(move(client), move(server), payload);
   case enumToInt(Opcodes::SYNC):
-    cout << "got delete\n";
-    break;
+    return from_payload_path<SyncRequest>(move(client), move(server), payload);
   case enumToInt(Opcodes::EXISTS):
-    cout << "got exists\n";
-    break;
+    return from_payload_path_watch<ExistsRequest>(move(client), move(server), payload);
   default:
     break;
   }
@@ -189,10 +227,6 @@ unique_ptr<ConnectRequest> ConnectRequest::from_payload(string client, string se
     protocol, zxid, timeout, session, move(passwd), readonly);
 }
 
-unique_ptr<PingRequest> PingRequest::from_payload(string client, string server, const string& payload) {
-  return make_unique<PingRequest>(move(client), move(server));
-}
-
 unique_ptr<AuthRequest> AuthRequest::from_payload(string client, string server, const string& payload) {
   // xid(int) + opcode(int) + type(int) + scheme(int + str) + cred(int + auth)
   CHECK_LENGTH(payload, 20);
@@ -202,16 +236,6 @@ unique_ptr<AuthRequest> AuthRequest::from_payload(string client, string server, 
   string cred = read_buffer(payload, 20 + scheme.length());
 
   return make_unique<AuthRequest>(move(client), move(server), type, move(scheme), move(cred));
-}
-
-unique_ptr<GetRequest> GetRequest::from_payload(string client, string server, const string& payload) {
-  // xid(int) + opcode(int) + path(int + str) + watch(bool)
-  CHECK_LENGTH(payload, 14);
-
-  string path = read_buffer(payload, 12);
-  bool watch = read_bool(payload, 12 + 4 + path.length());
-
-  return make_unique<GetRequest>(move(client), move(server), move(path), watch);
 }
 
 unique_ptr<CreateRequest> CreateRequest::from_payload(string client, string server, const string& payload) {

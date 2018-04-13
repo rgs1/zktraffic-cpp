@@ -39,20 +39,64 @@ class ZKMessage {
 public:
   ZKMessage(string client, string server) :
     client_(std::move(client)), server_(std::move(server)) {};
+  ZKMessage(string client, string server, string path) :
+    client_(move(client)), server_(move(server)), path_(move(path)) {};
+  ZKMessage(string client, string server, string path, bool watch) :
+    client_(move(client)), server_(move(server)), path_(move(path)), watch_(watch) {};
+  ZKMessage(string client, string server, string path, int version) :
+    client_(move(client)), server_(move(server)), path_(move(path)), version_(version) {};
   virtual operator std::string() const = 0;
 
   const string& client() const { return client_; }
   const string& server() const { return server_; }
 
 protected:
+  string req_version(const string& req) const {
+    stringstream ss;
+    ss << req << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  path=" << path_ << "\n" <<
+      "  version=" << version_ << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+  string req_watch(const string& req) const {
+    stringstream ss;
+    ss << req << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  path=" << path_ << "\n" <<
+      "  watch=" << watch_ << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+  string req_path(const string& req) const {
+    stringstream ss;
+    ss << req << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  path=" << path_ << "\n" <<
+      ")\n";
+    return ss.str();
+  }
   string client_;
   string server_;
+  string path_;
+  bool watch_;
+  int version_;
 };
 
 class ZKClientMessage : public ZKMessage {
 public:
   ZKClientMessage(string client, string server) :
     ZKMessage(std::move(client), std::move(server)) {};
+  ZKClientMessage(string client, string server, string path) :
+    ZKMessage(std::move(client), std::move(server), move(path)) {};
+  ZKClientMessage(string client, string server, string path, bool watch) :
+    ZKMessage(std::move(client), std::move(server), move(path), watch) {};
+  ZKClientMessage(string client, string server, string path, int version) :
+    ZKMessage(std::move(client), std::move(server), move(path), version) {};
   static std::unique_ptr<ZKClientMessage> from_payload(string, string, const string&);
 };
 
@@ -140,32 +184,17 @@ private:
 class GetRequest : public ZKClientMessage {
 public:
   GetRequest(string client, string server, string path, bool watch) :
-    ZKClientMessage(std::move(client), std::move(server)),
-    path_(move(path)), watch_(watch) {};
+    ZKClientMessage(move(client), move(server), move(path), watch) {};
 
   static std::unique_ptr<GetRequest> from_payload(string, string, const string&);
-
-  operator std::string() const {
-    stringstream ss;
-    ss << "GetRequest(\n" <<
-      "  client=" << client_ << "\n" <<
-      "  server=" << server_ << "\n" <<
-      "  path=" << path_ << "\n" <<
-      "  watch=" << watch_ << "\n" <<
-      ")\n";
-    return ss.str();
-  };
-
-private:
-  string path_;
-  bool watch_;
+  operator std::string() const { return req_watch("GetRequest"); }
 };
 
 class CreateRequest : public ZKClientMessage {
 public:
   CreateRequest(string client, string server, string path,
     bool ephemeral, bool sequence, vector<Acl> acls) :
-    ZKClientMessage(move(client), move(server)), path_(move(path)),
+    ZKClientMessage(move(client), move(server), move(path)),
     ephemeral_(ephemeral), sequence_(sequence), acls_(move(acls)) {};
 
   static std::unique_ptr<CreateRequest> from_payload(string, string, const string&);
@@ -197,10 +226,49 @@ private:
     }
     return ss.str();
   };
-  string path_;
   bool ephemeral_;
   bool sequence_;
   vector<Acl> acls_;
 };
 
-}
+class SetRequest : public ZKClientMessage {
+public:
+  SetRequest(string client, string server, string path, int version) :
+    ZKClientMessage(move(client), move(server), move(path), version) {};
+
+  operator std::string() const { return req_version("SetRequest"); }
+};
+
+class DeleteRequest : public ZKClientMessage {
+public:
+  DeleteRequest(string client, string server, string path, int version) :
+    ZKClientMessage(move(client), move(server), move(path), version) {};
+
+  operator std::string() const { return req_version("DeleteRequest"); }
+};
+
+class GetChildrenRequest : public ZKClientMessage {
+public:
+  GetChildrenRequest(string client, string server, string path, bool watch) :
+    ZKClientMessage(move(client), move(server), move(path), watch) {};
+
+  operator std::string() const { return req_watch("GetChildrenRequest"); }
+};
+
+class ExistsRequest : public ZKClientMessage {
+public:
+  ExistsRequest(string client, string server, string path, bool watch) :
+    ZKClientMessage(move(client), move(server), move(path), watch) {};
+
+  operator std::string() const { return req_watch("ExistsRequest"); }
+};
+
+class SyncRequest : public ZKClientMessage {
+public:
+  SyncRequest(string client, string server, string path) :
+    ZKClientMessage(move(client), move(server), move(path)) {};
+
+  operator std::string() const { return req_path("SyncRequest"); }
+};
+
+} // Zktraffic
