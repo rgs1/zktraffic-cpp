@@ -39,16 +39,27 @@ class ZKMessage {
 public:
   ZKMessage(string client, string server) :
     client_(std::move(client)), server_(std::move(server)) {};
-  ZKMessage(string client, string server, string path) :
-    client_(move(client)), server_(move(server)), path_(move(path)) {};
-  ZKMessage(string client, string server, string path, bool watch) :
-    client_(move(client)), server_(move(server)), path_(move(path)), watch_(watch) {};
-  ZKMessage(string client, string server, string path, int version) :
-    client_(move(client)), server_(move(server)), path_(move(path)), version_(version) {};
   virtual operator std::string() const = 0;
 
   const string& client() const { return client_; }
   const string& server() const { return server_; }
+
+protected:
+  string client_;
+  string server_;
+};
+
+class ZKClientMessage : public ZKMessage {
+public:
+  ZKClientMessage(string client, string server) :
+    ZKMessage(std::move(client), std::move(server)) {};
+  ZKClientMessage(string client, string server, string path) :
+    ZKMessage(std::move(client), std::move(server)), path_(move(path)) {};
+  ZKClientMessage(string client, string server, string path, bool watch) :
+    ZKMessage(std::move(client), std::move(server)), path_(move(path)), watch_(watch) {};
+  ZKClientMessage(string client, string server, string path, int version) :
+    ZKMessage(std::move(client), std::move(server)), path_(move(path)), version_(version) {};
+  static std::unique_ptr<ZKClientMessage> from_payload(string, string, const string&);
 
 protected:
   string req_version(const string& req) const {
@@ -80,31 +91,128 @@ protected:
       ")\n";
     return ss.str();
   }
-  string client_;
-  string server_;
   string path_;
   bool watch_;
   int version_;
 };
 
-class ZKClientMessage : public ZKMessage {
-public:
-  ZKClientMessage(string client, string server) :
-    ZKMessage(std::move(client), std::move(server)) {};
-  ZKClientMessage(string client, string server, string path) :
-    ZKMessage(std::move(client), std::move(server), move(path)) {};
-  ZKClientMessage(string client, string server, string path, bool watch) :
-    ZKMessage(std::move(client), std::move(server), move(path), watch) {};
-  ZKClientMessage(string client, string server, string path, int version) :
-    ZKMessage(std::move(client), std::move(server), move(path), version) {};
-  static std::unique_ptr<ZKClientMessage> from_payload(string, string, const string&);
-};
-
 class ZKServerMessage : public ZKMessage {
 public:
-  ZKServerMessage(string client, string server) :
-    ZKMessage(std::move(client), std::move(server)) {};
+  ZKServerMessage(string client, string server, int xid, long long zxid, int error) :
+    ZKMessage(move(client), move(server)), xid_(xid), zxid_(zxid), error_(error) {};
   static std::unique_ptr<ZKServerMessage> from_payload(string, string, const string&);
+
+protected:
+  string reply(const string& replytype) const {
+    stringstream ss;
+    ss << replytype << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
+      "  zxid=" << zxid_ << "\n" <<
+      "  error=" << error_ << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+  int xid_;
+  long long zxid_;
+  int error_;
+};
+
+class PingReply : public ZKServerMessage {
+public:
+  PingReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error) {};
+
+  operator std::string() const { return reply("PingReply"); }
+};
+
+template <typename T>
+constexpr uint32_t enumToInt(T val) {
+  return static_cast<uint32_t>(val);
+}
+
+enum class EventType {
+  CREATED = 1,
+  DELETED = 2,
+  CHANGED = 3,
+  CHILD = 4
+};
+
+enum class State {
+  DISCONNECTED = 0,
+  NO_SYNC_CONNECTED = 1,
+  SYNC_CONNECTED = 3,
+  AUTH_FAILED = 4,
+  CONNECTED_READ_ONLY = 5,
+  SASL_AUTHENTICATED = 6,
+  EXPIRED = -112
+};
+
+class WatchEvent : public ZKServerMessage {
+public:
+  WatchEvent(string client, string server, int xid, long long zxid, int error,
+    int event_type, int state, string path) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    event_type_(event_type), state_(state), path_(move(path)) {};
+
+  static std::unique_ptr<WatchEvent> from_payload(string, string, const std::string&, int, long long, int);
+  operator std::string() const {
+    stringstream ss;
+    ss << "WatchEvent(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
+      "  zxid=" << zxid_ << "\n" <<
+      "  error=" << error_ << "\n" <<
+      "  event_type=" << event_to_name(event_type_) << "\n" <<
+      "  state=" << state_to_name(state_) << "\n" <<
+      "  path=" << path_ << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+
+protected:
+  int event_type_;
+  int state_;
+  string path_;
+
+private:
+  const char * event_to_name(int event) const {
+    switch (event) {
+    case enumToInt(EventType::CREATED):
+      return "created";
+    case enumToInt(EventType::DELETED):
+      return "deleted";
+    case enumToInt(EventType::CHANGED):
+      return "changed";
+    case enumToInt(EventType::CHILD):
+      return "child";
+    }
+
+    return "unknown";
+  }
+
+  const char * state_to_name(int state) const {
+    switch (state) {
+    case enumToInt(State::DISCONNECTED):
+      return "disconnected";
+    case enumToInt(State::NO_SYNC_CONNECTED):
+      return "no_sync_connected";
+    case enumToInt(State::SYNC_CONNECTED):
+      return "sync_connected";
+    case enumToInt(State::AUTH_FAILED):
+      return "auth_failed";
+    case enumToInt(State::CONNECTED_READ_ONLY):
+      return "read_only";
+    case enumToInt(State::SASL_AUTHENTICATED):
+      return "sasl_authenticated";
+    case enumToInt(State::EXPIRED):
+      return "expired";
+    }
+
+    return "unknown";
+  }
 };
 
 class ConnectRequest : public ZKClientMessage {

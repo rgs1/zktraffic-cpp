@@ -26,7 +26,7 @@ int read_number(const string& data, unsigned int offset) {
   return number;
 }
 
-int read_long(const string& data, int offset) {
+long long read_long(const string& data, int offset) {
   auto n = data.substr(offset, 8);
   long long number = ((unsigned long long)n[7]<<0) | \
     ((unsigned long long)n[6]<<8) | \
@@ -81,11 +81,6 @@ const int WATCH_XID = -1;
 const int PING_XID = -2;
 const int AUTH_XID = -4;
 const int SET_WATCHES_XID = -8;
-
-template <typename T>
-constexpr uint32_t enumToInt(T val) {
-  return static_cast<uint32_t>(val);
-}
 
 enum class Opcodes {
   CONNECT = 0,
@@ -164,7 +159,7 @@ void dump_payload(const string& payload) {
 
 unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
   string server, const string& payload) {
-  CHECK_LENGTH(payload, 0);
+  CHECK_LENGTH(payload, 8);
 
   // "special" requests
   int xid = read_number(payload, 4);
@@ -206,10 +201,38 @@ unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
 }
 
 unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(string client, string server, const string& payload) {
-  // handle responses
-  // handle watches firing
+  CHECK_LENGTH(payload, 16);
+
+  // "special" server messages
+  int xid = read_number(payload, 4);
+  long long zxid = read_long(payload, 8);
+  int error = read_number(payload, 16);
+
+  switch (xid) {
+  case PING_XID:
+    return make_unique<PingReply>(move(client), move(server), xid, zxid, error);
+  case WATCH_XID:
+    return WatchEvent::from_payload(move(client), move(server), payload, xid, zxid, error);
+  default:
+    break;
+  }
+
+  // handle responses from seen requests
 
   return nullptr;
+}
+
+unique_ptr<WatchEvent> WatchEvent::from_payload(string client, string server, const string& payload,
+  int xid, long long zxid, int error) {
+  // reply_header(16) + event_type(int) + state(int) + path(int + str)
+  CHECK_LENGTH(payload, 29);
+
+  int event_type = read_number(payload, 20);
+  int state = read_number(payload, 24);
+  string path = read_buffer(payload, 28);
+
+  return make_unique<WatchEvent>(move(client), move(server),
+    xid, zxid, error, event_type, state, path);
 }
 
 unique_ptr<ConnectRequest> ConnectRequest::from_payload(string client, string server, const string& payload) {
