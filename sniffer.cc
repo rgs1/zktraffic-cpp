@@ -69,10 +69,17 @@ void Sniffer::packetHandler(const struct pcap_pkthdr* header,  const u_char *pac
     auto client = tcpp->src();
     auto server = tcpp->dst();
     message = ZKClientMessage::from_payload(move(client), move(server), tcpp->payload());
+    if (message != nullptr) {
+      auto client_msg = dynamic_cast<ZKClientMessage *>(message.get());
+      // TODO: check for max msgs
+      requests_.emplace(client_msg->xid(), client_msg->opcode());
+    }
   } else {
     auto server = tcpp->src();
     auto client = tcpp->dst();
-    message = ZKServerMessage::from_payload(move(client), move(server), tcpp->payload());
+    message = ZKServerMessage::from_payload(move(client), move(server), tcpp->payload(), requests_);
+    if (message != nullptr)
+      requests_.erase(message->xid());
   }
 
   // add to the queue

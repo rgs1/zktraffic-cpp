@@ -4,11 +4,41 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace std;
 
 namespace Zktraffic {
+
+const int CONNECT_XID = 0;
+const int WATCH_XID = -1;
+const int PING_XID = -2;
+const int AUTH_XID = -4;
+const int SET_WATCHES_XID = -8;
+
+enum class Opcodes {
+  CONNECT = 0,
+  CREATE = 1,
+  DELETE = 2,
+  EXISTS = 3,
+  GETDATA = 4,
+  SETDATA = 5,
+  GETACL = 6,
+  SETACL = 7,
+  GETCHILDREN = 8,
+  SYNC = 9,
+  PING = 11,
+  GETCHILDREN2 = 12,
+  CHECK = 13,
+  MULTI = 14,
+  CREATE2 = 15,
+  RECONFIG = 16,
+  CREATESESSION = -10,
+  CLOSE = -11,
+  SETAUTH = 100,
+  SETWATCHES = 101
+};
 
 class Acl {
 public:
@@ -35,31 +65,84 @@ private:
   string credential_;
 };
 
+template <typename T>
+constexpr uint32_t enumToInt(T val) {
+  return static_cast<uint32_t>(val);
+}
+
 class ZKMessage {
 public:
-  ZKMessage(string client, string server) :
-    client_(std::move(client)), server_(std::move(server)) {};
+  ZKMessage(string client, string server, int xid) :
+    client_(std::move(client)), server_(std::move(server)), xid_(xid) {};
   virtual operator std::string() const = 0;
 
   const string& client() const { return client_; }
   const string& server() const { return server_; }
+  int xid() { return xid_; }
 
 protected:
+  static const char * opcode_to_name(int opcode) {
+    switch (opcode) {
+    case enumToInt(Opcodes::SETWATCHES):
+      return "SETWATCHES";
+    case enumToInt(Opcodes::SETAUTH):
+      return "SETAUTH";
+    case enumToInt(Opcodes::CLOSE):
+      return "CLOSE";
+    case enumToInt(Opcodes::CREATESESSION):
+      return "CREATESESSION";
+    case enumToInt(Opcodes::RECONFIG):
+      return "RECONFIG";
+    case enumToInt(Opcodes::CREATE2):
+      return "CREATE2";
+    case enumToInt(Opcodes::MULTI):
+      return "MULTI";
+    case enumToInt(Opcodes::CHECK):
+      return "CHECK";
+    case enumToInt(Opcodes::GETCHILDREN2):
+      return "GETCHILDREN2";
+    case enumToInt(Opcodes::PING):
+      return "PING";
+    case enumToInt(Opcodes::SYNC):
+      return "SYNC";
+    case enumToInt(Opcodes::GETCHILDREN):
+      return "GETCHILDREN";
+    case enumToInt(Opcodes::SETACL):
+      return "SETACL";
+    case enumToInt(Opcodes::GETACL):
+      return "GETACL";
+    case enumToInt(Opcodes::SETDATA):
+      return "SETDATA";
+    case enumToInt(Opcodes::GETDATA):
+      return "GETDATA";
+    case enumToInt(Opcodes::EXISTS):
+      return "EXISTS";
+    case enumToInt(Opcodes::DELETE):
+      return "DELETE";
+    case enumToInt(Opcodes::CREATE):
+      return "CREATE";
+    case enumToInt(Opcodes::CONNECT):
+      return "CONNECT";
+    }
+    return "unknown";
+  }
   string client_;
   string server_;
+  int xid_;
 };
 
 class ZKClientMessage : public ZKMessage {
 public:
-  ZKClientMessage(string client, string server) :
-    ZKMessage(std::move(client), std::move(server)) {};
-  ZKClientMessage(string client, string server, string path) :
-    ZKMessage(std::move(client), std::move(server)), path_(move(path)) {};
-  ZKClientMessage(string client, string server, string path, bool watch) :
-    ZKMessage(std::move(client), std::move(server)), path_(move(path)), watch_(watch) {};
-  ZKClientMessage(string client, string server, string path, int version) :
-    ZKMessage(std::move(client), std::move(server)), path_(move(path)), version_(version) {};
+  ZKClientMessage(string client, string server, int xid) :
+    ZKMessage(move(client), move(server), xid) {};
+  ZKClientMessage(string client, string server, int xid, string path) :
+    ZKMessage(move(client), move(server), xid), path_(move(path)) {};
+  ZKClientMessage(string client, string server, int xid, string path, bool watch) :
+    ZKMessage(move(client), move(server), xid), path_(move(path)), watch_(watch) {};
+  ZKClientMessage(string client, string server, int xid, string path, int version) :
+    ZKMessage(move(client), move(server), xid), path_(move(path)), version_(version) {};
   static std::unique_ptr<ZKClientMessage> from_payload(string, string, const string&);
+  virtual int opcode() const = 0;
 
 protected:
   string req_version(const string& req) const {
@@ -99,8 +182,9 @@ protected:
 class ZKServerMessage : public ZKMessage {
 public:
   ZKServerMessage(string client, string server, int xid, long long zxid, int error) :
-    ZKMessage(move(client), move(server)), xid_(xid), zxid_(zxid), error_(error) {};
-  static std::unique_ptr<ZKServerMessage> from_payload(string, string, const string&);
+    ZKMessage(move(client), move(server), xid), zxid_(zxid), error_(error) {};
+  static std::unique_ptr<ZKServerMessage> from_payload(string, string,
+      const string&, const unordered_map<int, int>&);
 
 protected:
   string reply(const string& replytype) const {
@@ -114,23 +198,17 @@ protected:
       ")\n";
     return ss.str();
   }
-  int xid_;
   long long zxid_;
   int error_;
 };
 
 class PingReply : public ZKServerMessage {
 public:
-  PingReply(string client, string server, int xid, long long zxid, int error) :
-    ZKServerMessage(move(client), move(server), xid, zxid, error) {};
+  PingReply(string client, string server, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), PING_XID, zxid, error) {};
 
   operator std::string() const { return reply("PingReply"); }
 };
-
-template <typename T>
-constexpr uint32_t enumToInt(T val) {
-  return static_cast<uint32_t>(val);
-}
 
 enum class EventType {
   CREATED = 1,
@@ -151,12 +229,12 @@ enum class State {
 
 class WatchEvent : public ZKServerMessage {
 public:
-  WatchEvent(string client, string server, int xid, long long zxid, int error,
+  WatchEvent(string client, string server, long long zxid, int error,
     int event_type, int state, string path) :
-    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    ZKServerMessage(move(client), move(server), WATCH_XID, zxid, error),
     event_type_(event_type), state_(state), path_(move(path)) {};
 
-  static std::unique_ptr<WatchEvent> from_payload(string, string, const std::string&, int, long long, int);
+  static std::unique_ptr<WatchEvent> from_payload(string, string, const std::string&, long long, int);
   operator std::string() const {
     stringstream ss;
     ss << "WatchEvent(\n" <<
@@ -219,11 +297,12 @@ class ConnectRequest : public ZKClientMessage {
 public:
   ConnectRequest(string client, string server, int protocol, long long zxid, int timeout,
     long long session, std::string passwd, bool readonly) :
-    ZKClientMessage(std::move(client), std::move(server)),
+    ZKClientMessage(move(client), move(server), CONNECT_XID),
     protocol_(protocol), zxid_(zxid), timeout_(timeout),
     session_(session), passwd_(move(passwd)), readonly_(readonly) {};
 
   static std::unique_ptr<ConnectRequest> from_payload(string, string, const std::string&);
+  int opcode() const { return enumToInt(Opcodes::CONNECT); }
 
   operator std::string() const {
     std::stringstream ss;
@@ -248,9 +327,10 @@ private:
 class PingRequest : public ZKClientMessage {
 public:
   PingRequest(string client, string server) :
-    ZKClientMessage(std::move(client), std::move(server)) {};
+    ZKClientMessage(move(client), move(server), PING_XID) {};
 
   static std::unique_ptr<PingRequest> from_payload(string, string, const string&);
+  int opcode() const { return enumToInt(Opcodes::PING); }
 
   operator std::string() const {
     std::stringstream ss;
@@ -266,10 +346,11 @@ public:
 class AuthRequest : public ZKClientMessage {
 public:
   AuthRequest(string client, string server, int type, string scheme, string credential) :
-    ZKClientMessage(std::move(client), std::move(server)),
+    ZKClientMessage(move(client), move(server), AUTH_XID),
     type_(type), scheme_(move(scheme)), credential_(move(credential)) {};
 
   static std::unique_ptr<AuthRequest> from_payload(string, string, const string&);
+  int opcode() const { return enumToInt(Opcodes::SETAUTH); }
 
   operator std::string() const {
     stringstream ss;
@@ -291,18 +372,19 @@ private:
 
 class GetRequest : public ZKClientMessage {
 public:
-  GetRequest(string client, string server, string path, bool watch) :
-    ZKClientMessage(move(client), move(server), move(path), watch) {};
+  GetRequest(string client, string server, int xid, string path, bool watch) :
+    ZKClientMessage(move(client), move(server), xid, move(path), watch) {};
 
   static std::unique_ptr<GetRequest> from_payload(string, string, const string&);
   operator std::string() const { return req_watch("GetRequest"); }
+  int opcode() const { return enumToInt(Opcodes::GETDATA); }
 };
 
 class CreateRequest : public ZKClientMessage {
 public:
-  CreateRequest(string client, string server, string path,
+  CreateRequest(string client, string server, int xid, string path,
     bool ephemeral, bool sequence, vector<Acl> acls) :
-    ZKClientMessage(move(client), move(server), move(path)),
+    ZKClientMessage(move(client), move(server), xid, move(path)),
     ephemeral_(ephemeral), sequence_(sequence), acls_(move(acls)) {};
 
   static std::unique_ptr<CreateRequest> from_payload(string, string, const string&);
@@ -321,6 +403,7 @@ public:
       ")\n";
     return ss.str();
   };
+  int opcode() const { return enumToInt(Opcodes::CREATE); }
 
 private:
   string acls() const {
@@ -341,42 +424,47 @@ private:
 
 class SetRequest : public ZKClientMessage {
 public:
-  SetRequest(string client, string server, string path, int version) :
-    ZKClientMessage(move(client), move(server), move(path), version) {};
+  SetRequest(string client, string server, int xid, string path, int version) :
+    ZKClientMessage(move(client), move(server), xid, move(path), version) {};
 
   operator std::string() const { return req_version("SetRequest"); }
+  int opcode() const { return enumToInt(Opcodes::SETDATA); }
 };
 
 class DeleteRequest : public ZKClientMessage {
 public:
-  DeleteRequest(string client, string server, string path, int version) :
-    ZKClientMessage(move(client), move(server), move(path), version) {};
+  DeleteRequest(string client, string server, int xid, string path, int version) :
+    ZKClientMessage(move(client), move(server), xid, move(path), version) {};
 
   operator std::string() const { return req_version("DeleteRequest"); }
+  int opcode() const { return enumToInt(Opcodes::DELETE); }
 };
 
 class GetChildrenRequest : public ZKClientMessage {
 public:
-  GetChildrenRequest(string client, string server, string path, bool watch) :
-    ZKClientMessage(move(client), move(server), move(path), watch) {};
+  GetChildrenRequest(string client, string server, int xid, string path, bool watch) :
+    ZKClientMessage(move(client), move(server), xid, move(path), watch) {};
 
   operator std::string() const { return req_watch("GetChildrenRequest"); }
+  int opcode() const { return enumToInt(Opcodes::GETCHILDREN); }
 };
 
 class ExistsRequest : public ZKClientMessage {
 public:
-  ExistsRequest(string client, string server, string path, bool watch) :
-    ZKClientMessage(move(client), move(server), move(path), watch) {};
+  ExistsRequest(string client, string server, int xid, string path, bool watch) :
+    ZKClientMessage(move(client), move(server), xid, move(path), watch) {};
 
   operator std::string() const { return req_watch("ExistsRequest"); }
+  int opcode() const { return enumToInt(Opcodes::EXISTS); }
 };
 
 class SyncRequest : public ZKClientMessage {
 public:
-  SyncRequest(string client, string server, string path) :
-    ZKClientMessage(move(client), move(server), move(path)) {};
+  SyncRequest(string client, string server, int xid, string path) :
+    ZKClientMessage(move(client), move(server), xid, move(path)) {};
 
   operator std::string() const { return req_path("SyncRequest"); }
+  int opcode() const { return enumToInt(Opcodes::SYNC); }
 };
 
 } // Zktraffic

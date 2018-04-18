@@ -6,6 +6,7 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include "pcap.h"
 
@@ -41,6 +42,7 @@ private:
   queue<unique_ptr<ZKMessage>> queue_;
   mutex mutex_;
   condition_variable cv_;
+  unordered_map<int, int> requests_;  // TODO: protect with lock
 };
 
 }

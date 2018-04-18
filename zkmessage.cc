@@ -47,7 +47,7 @@ bool read_bool(const string& data, unsigned int offset) {
   return (bool)(data[offset] & 255);
 }
 
-string read_buffer(const string& data, int offset) {
+string read_buffer(const string& data, int offset, int maxlen=1048576) {
   int length = read_number(data, offset);
   return data.substr(offset + 4, length);
 }
@@ -76,44 +76,16 @@ pair<vector<Acl>, int> read_acls(const string& payload, int offset) {
   return pair<vector<Acl>, int>{acls, offset};
 }
 
-const int CONNECT_XID = 0;
-const int WATCH_XID = -1;
-const int PING_XID = -2;
-const int AUTH_XID = -4;
-const int SET_WATCHES_XID = -8;
-
-enum class Opcodes {
-  CONNECT = 0,
-  CREATE = 1,
-  DELETE = 2,
-  EXISTS = 3,
-  GETDATA = 4,
-  SETDATA = 5,
-  GETACL = 6,
-  SETACL = 7,
-  GETCHILDREN = 8,
-  SYNC = 9,
-  PING = 11,
-  GETCHILDREN2 = 12,
-  CHECK = 13,
-  MULTI = 14,
-  CREATE2 = 15,
-  RECONFIG = 16,
-  CREATESESSION = -10,
-  CLOSE = -11,
-  SETAUTH = 100,
-  SETWATCHES = 101
-};
-
 template <typename T>
 unique_ptr<T> from_payload_path_watch(string client, string server, const string& payload) {
   // xid(int) + opcode(int) + path(int + str) + watch(bool)
   CHECK_LENGTH(payload, 14);
 
+  int xid = read_number(payload, 4);
   string path = read_buffer(payload, 12);
   bool watch = read_bool(payload, 12 + 4 + path.length());
 
-  return make_unique<T>(move(client), move(server), move(path), watch);
+  return make_unique<T>(move(client), move(server), xid, move(path), watch);
 }
 
 template <typename T>
@@ -121,11 +93,12 @@ unique_ptr<T> from_payload_path_data_version(string client, string server, const
   // xid(int) + opcode(int) + path(int + str) + data(str) + version(int)
   CHECK_LENGTH(payload, 22);
 
+  int xid = read_number(payload, 4);
   string path = read_buffer(payload, 12);
   int data_len = read_number(payload, 16 + path.length());
   int version = read_number(payload, 20 + path.length() + data_len);
 
-  return make_unique<T>(move(client), move(server), move(path), version);
+  return make_unique<T>(move(client), move(server), xid, move(path), version);
 }
 
 template <typename T>
@@ -133,19 +106,22 @@ unique_ptr<T> from_payload_path_version(string client, string server, const stri
   // xid(int) + opcode(int) + path(int + str) + version(int)
   CHECK_LENGTH(payload, 17);
 
+  int xid = read_number(payload, 4);
   string path = read_buffer(payload, 12);
   int version = read_number(payload, 16 + path.length());
 
-  return make_unique<T>(move(client), move(server), move(path), version);
+  return make_unique<T>(move(client), move(server), xid, move(path), version);
 }
 
 template <typename T>
 unique_ptr<T> from_payload_path(string client, string server, const string& payload) {
   // xid(int) + opcode(int) + path(int + str)
   CHECK_LENGTH(payload, 17);
+
+  int xid = read_number(payload, 4);
   string path = read_buffer(payload, 12);
 
-  return make_unique<T>(move(client), move(server), move(path));
+  return make_unique<T>(move(client), move(server), xid, move(path));
 }
 
 /*
@@ -200,7 +176,8 @@ unique_ptr<ZKClientMessage> ZKClientMessage::from_payload(string client,
   return nullptr;
 }
 
-unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(string client, string server, const string& payload) {
+unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(string client, string server,
+  const string& payload, const unordered_map<int, int>& requests) {
   CHECK_LENGTH(payload, 16);
 
   // "special" server messages
@@ -210,20 +187,24 @@ unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(string client, string 
 
   switch (xid) {
   case PING_XID:
-    return make_unique<PingReply>(move(client), move(server), xid, zxid, error);
+    return make_unique<PingReply>(move(client), move(server), zxid, error);
   case WATCH_XID:
-    return WatchEvent::from_payload(move(client), move(server), payload, xid, zxid, error);
+    return WatchEvent::from_payload(move(client), move(server), payload, zxid, error);
   default:
     break;
   }
 
   // handle responses from seen requests
+  auto opcode = requests.find(xid);
+  if (opcode != requests.end()) {
+    cout << "got a reply for " << opcode_to_name(opcode->second) << "\n";
+  }
 
   return nullptr;
 }
 
 unique_ptr<WatchEvent> WatchEvent::from_payload(string client, string server, const string& payload,
-  int xid, long long zxid, int error) {
+  long long zxid, int error) {
   // reply_header(16) + event_type(int) + state(int) + path(int + str)
   CHECK_LENGTH(payload, 29);
 
@@ -231,8 +212,7 @@ unique_ptr<WatchEvent> WatchEvent::from_payload(string client, string server, co
   int state = read_number(payload, 24);
   string path = read_buffer(payload, 28);
 
-  return make_unique<WatchEvent>(move(client), move(server),
-    xid, zxid, error, event_type, state, path);
+  return make_unique<WatchEvent>(move(client), move(server), zxid, error, event_type, state, path);
 }
 
 unique_ptr<ConnectRequest> ConnectRequest::from_payload(string client, string server, const string& payload) {
@@ -265,6 +245,7 @@ unique_ptr<CreateRequest> CreateRequest::from_payload(string client, string serv
   // xid(int) + opcode(int) + path(int + str) + data(str) + acls(vector) + ephemeral(bool) + sequence(bool)
   CHECK_LENGTH(payload, 25);
 
+  int xid = read_number(payload, 4);
   string path = read_buffer(payload, 12);
   int data_len = read_number(payload, 16 + path.length());
   auto acls_rv = read_acls(payload, 20 + path.length() + data_len);
@@ -273,7 +254,7 @@ unique_ptr<CreateRequest> CreateRequest::from_payload(string client, string serv
   bool ephemeral = (flags & 0x1) == 1;
   bool sequence = (flags & 0x2) == 2;
 
-  return make_unique<CreateRequest>(move(client), move(server), move(path),
+  return make_unique<CreateRequest>(move(client), move(server), xid, move(path),
     ephemeral, sequence, move(acls));
 }
 
