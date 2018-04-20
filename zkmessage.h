@@ -241,6 +241,67 @@ protected:
       ")\n";
     return ss.str();
   }
+  string reply_data(const string& reply, const string& fname, const string& data) const {
+    stringstream ss;
+    ss << reply << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
+      "  zxid=" << zxid_ << "\n" <<
+      "  error=" << error_ << "\n" <<
+      "  " << fname << "=" << data << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+  string reply_data_stat(const string& reply, const string& fname, const string& data, const string& stat) const {
+    stringstream ss;
+    ss << reply << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
+      "  zxid=" << zxid_ << "\n" <<
+      "  error=" << error_ << "\n" <<
+      "  " << fname << "=" << data << "\n" <<
+      "  stat=" << stat << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+  string reply_vec_stat(const string& reply, const string& fname, const vector<string>& vec, const string& stat) const {
+    stringstream ss;
+    ss << reply << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
+      "  zxid=" << zxid_ << "\n" <<
+      "  error=" << error_ << "\n" <<
+      "  " << fname << "=" << join(vec, ",") << "\n" <<
+      "  stat=" << stat << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+  string reply_stat(const string& reply, const string& stat) const {
+    stringstream ss;
+    ss << reply << "(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
+      "  zxid=" << zxid_ << "\n" <<
+      "  error=" << error_ << "\n" <<
+      "  stat=" << stat << "\n" <<
+      ")\n";
+    return ss.str();
+  }
+  string join(const vector<string>& vec, const string& delim) const {
+    bool first = true;
+    stringstream ss;
+    for (auto s: vec) {
+      if (!first)
+	ss << delim;
+      ss << s;
+      first = false;
+    }
+    return ss.str();
+  }
   long long zxid_;
   int error_;
 };
@@ -269,22 +330,135 @@ public:
     string stat = "";
     if (!error_)
       stat = *stat_.get();
-    stringstream ss;
-    ss << "GetReply(\n" <<
-      "  client=" << client_ << "\n" <<
-      "  server=" << server_ << "\n" <<
-      "  xid=" << xid_ << "\n" <<
-      "  zxid=" << zxid_ << "\n" <<
-      "  error=" << error_ << "\n" <<
-      "  data=" << data << "\n" <<
-      "  stat=" << stat << "\n" <<
-      ")\n";
-
-    return ss.str();
+    return reply_data_stat("GetReply", "data", data, stat);
   }
 
 private:
   string data_;
+  unique_ptr<ZnodeStat> stat_;
+};
+
+class CreateReply : public ZKServerMessage {
+public:
+  CreateReply(string client, string server, int xid, long long zxid, int error, string path) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    path_(move(path)), stat_(nullptr) {};
+
+  CreateReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    path_(nullptr), stat_(nullptr) {};
+
+  CreateReply(string client, string server, int xid, long long zxid, int error,
+    string path, unique_ptr<ZnodeStat> stat) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+	path_(move(path)), stat_(move(stat)) {};
+
+  operator std::string() const {
+    const auto name = stat_ == nullptr ? "CreateReply" : "Create2Reply";
+    auto& data = error_ ? "" : path_;
+    string stat = "";
+    if (!error_ && stat_ != nullptr)
+      stat = *stat_.get();
+    return reply_data_stat(name, "path", data, stat);
+  }
+
+private:
+  string path_;
+  unique_ptr<ZnodeStat> stat_;
+};
+
+class GetChildrenReply : public ZKServerMessage {
+public:
+  GetChildrenReply(string client, string server, int xid, long long zxid, int error, vector<string> children) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    children_(move(children)), stat_(nullptr) {};
+
+  GetChildrenReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    children_(vector<string>{}), stat_(nullptr) {};
+
+  GetChildrenReply(string client, string server, int xid, long long zxid, int error,
+    vector<string> children, unique_ptr<ZnodeStat> stat) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+	children_(move(children)), stat_(move(stat)) {};
+
+  operator std::string() const {
+    const auto name = stat_ == nullptr ? "GetChildrenReply" : "GetChildren2Reply";
+    string stat = "";
+    if (!error_ && stat_ != nullptr)
+      stat = *stat_.get();
+    return reply_vec_stat(name, "children", children_, stat);
+  }
+
+private:
+  vector<string> children_{};
+  unique_ptr<ZnodeStat> stat_;
+};
+
+class SetReply : public ZKServerMessage {
+public:
+  SetReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error), stat_(nullptr) {};
+
+  SetReply(string client, string server, int xid, long long zxid, int error,
+    unique_ptr<ZnodeStat> stat) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error), stat_(move(stat)) {};
+
+  operator std::string() const {
+    string stat = "";
+    if (!error_ && stat_ != nullptr)
+      stat = *stat_.get();
+    return reply_stat("SetReply", stat);
+  }
+
+private:
+  unique_ptr<ZnodeStat> stat_;
+};
+
+class DeleteReply : public ZKServerMessage {
+public:
+  DeleteReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error) {};
+
+  operator std::string() const { return reply("DeleteReply"); }
+};
+
+class SyncReply : public ZKServerMessage {
+public:
+  SyncReply(string client, string server, int xid, long long zxid, int error, string path) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    path_(move(path)) {};
+
+  SyncReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    path_(nullptr) {};
+
+  operator std::string() const {
+    auto& data = error_ ? "" : path_;
+    return reply_data("SyncReply", "path", data);
+  }
+
+private:
+  string path_;
+};
+
+class ExistsReply : public ZKServerMessage {
+public:
+  ExistsReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error), stat_(nullptr) {};
+
+  ExistsReply(string client, string server, int xid, long long zxid, int error,
+    unique_ptr<ZnodeStat> stat) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error), stat_(move(stat)) {};
+
+  operator std::string() const {
+    string stat = "";
+    if (!error_ && stat_ != nullptr)
+      stat = *stat_.get();
+    return reply_stat("ExistsReply", stat);
+  }
+
+private:
   unique_ptr<ZnodeStat> stat_;
 };
 
@@ -450,7 +624,7 @@ private:
 
 class GetRequest : public ZKClientMessage {
 public:
-  GetRequest(string client, string server, int xid, string path, bool watch) :
+  GetRequest(string client, string server, int xid, string path, bool watch, int opcode) :
     ZKClientMessage(move(client), move(server), xid, move(path), watch) {};
 
   static std::unique_ptr<GetRequest> from_payload(string, string, const string&);
@@ -461,11 +635,11 @@ public:
 class CreateRequest : public ZKClientMessage {
 public:
   CreateRequest(string client, string server, int xid, string path,
-    bool ephemeral, bool sequence, vector<Acl> acls) :
+    bool ephemeral, bool sequence, vector<Acl> acls, int opcode) :
     ZKClientMessage(move(client), move(server), xid, move(path)),
-    ephemeral_(ephemeral), sequence_(sequence), acls_(move(acls)) {};
+    ephemeral_(ephemeral), sequence_(sequence), acls_(move(acls)), opcode_(opcode) {};
 
-  static std::unique_ptr<CreateRequest> from_payload(string, string, const string&);
+  static std::unique_ptr<CreateRequest> from_payload(string, string, const string&, int);
 
   operator std::string() const {
     auto ephemeral = ephemeral_ ? "true" : "false";
@@ -481,7 +655,7 @@ public:
       ")\n";
     return ss.str();
   };
-  int opcode() const { return enumToInt(Opcodes::CREATE); }
+  int opcode() const { return opcode_; }
 
 private:
   string acls() const {
@@ -498,6 +672,7 @@ private:
   bool ephemeral_;
   bool sequence_;
   vector<Acl> acls_;
+  int opcode_;
 };
 
 class SetRequest : public ZKClientMessage {
@@ -520,16 +695,22 @@ public:
 
 class GetChildrenRequest : public ZKClientMessage {
 public:
-  GetChildrenRequest(string client, string server, int xid, string path, bool watch) :
-    ZKClientMessage(move(client), move(server), xid, move(path), watch) {};
+  GetChildrenRequest(string client, string server, int xid, string path, bool watch, int opcode) :
+    ZKClientMessage(move(client), move(server), xid, move(path), watch), opcode_(opcode) {};
 
-  operator std::string() const { return req_watch("GetChildrenRequest"); }
-  int opcode() const { return enumToInt(Opcodes::GETCHILDREN); }
+  operator std::string() const {
+    const auto name = opcode_ == enumToInt(Opcodes::GETCHILDREN) ? "GetChildrenRequest" : "GetChildren2Request";
+    return req_watch(name);
+  }
+  int opcode() const { return opcode_; }
+
+private:
+  int opcode_;
 };
 
 class ExistsRequest : public ZKClientMessage {
 public:
-  ExistsRequest(string client, string server, int xid, string path, bool watch) :
+  ExistsRequest(string client, string server, int xid, string path, bool watch, int opcode) :
     ZKClientMessage(move(client), move(server), xid, move(path), watch) {};
 
   operator std::string() const { return req_watch("ExistsRequest"); }

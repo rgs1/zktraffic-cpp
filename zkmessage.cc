@@ -26,7 +26,7 @@ int read_number(const string& data, unsigned int offset) {
   return number;
 }
 
-string to_bits(char c) {
+string to_bits(unsigned char c) {
   stringstream ss;
 
   for (int i =7; i >= 0; i-- ) {
@@ -70,6 +70,24 @@ string read_buffer(const string& data, int offset, int maxlen=1048576) {
   return data.substr(offset + 4, length);
 }
 
+pair<vector<string>, int> read_vector(const string& payload, int offset, int max=1048576) {
+  vector<string> vec{};
+  int count = read_number(payload, offset);
+
+  offset += 4;
+
+  if (count < 0)
+    return pair<vector<string>, int>{vec, offset};
+
+  for (int i=0; i<count; i++) {
+    auto item = read_buffer(payload, offset);
+    offset += 4 + item.length();
+    vec.push_back(move(item));
+  }
+
+  return pair<vector<string>, int>{vec, offset};
+}
+
 pair<vector<Acl>, int> read_acls(const string& payload, int offset) {
   vector<Acl> acls{};
   int count = read_number(payload, offset);
@@ -100,10 +118,11 @@ unique_ptr<T> from_payload_path_watch(string client, string server, const string
   CHECK_LENGTH(payload, 14);
 
   int xid = read_number(payload, 4);
+  int opcode = read_number(payload, 8);
   string path = read_buffer(payload, 12);
   bool watch = read_bool(payload, 12 + 4 + path.length());
 
-  return make_unique<T>(move(client), move(server), xid, move(path), watch);
+  return make_unique<T>(move(client), move(server), xid, move(path), watch, opcode);
 }
 
 template <typename T>
@@ -175,6 +194,71 @@ unique_ptr<T> from_reply_payload_data_stat(string client, string server, int xid
   auto stat = read_stat(payload, 24 + data.length());
 
   return make_unique<T>(move(client), move(server), xid, zxid, error, move(data), move(stat));
+}
+
+template <typename T>
+unique_ptr<T> from_reply_payload_stat(string client, string server, int xid, long zxid, int error, const string& payload)
+{
+  // xid(int) + zxid(long) + error(int) + stat(68)
+  CHECK_LENGTH(payload, 16);
+
+  if (error) {
+    return make_unique<T>(move(client), move(server), xid, zxid, error);
+  }
+
+  CHECK_LENGTH(payload, 84);
+  auto stat = read_stat(payload, 20);
+
+  return make_unique<T>(move(client), move(server), xid, zxid, error, move(stat));
+}
+
+template <typename T>
+unique_ptr<T> from_reply_payload_data(string client, string server, int xid, long zxid, int error, const string& payload)
+{
+  // xid(int) + zxid(long) + error(int) + data(int + str)
+  CHECK_LENGTH(payload, 16);
+
+  if (error) {
+    return make_unique<T>(move(client), move(server), xid, zxid, error);
+  }
+
+  CHECK_LENGTH(payload, 20);
+  auto data = read_buffer(payload, 20);
+
+  return make_unique<T>(move(client), move(server), xid, zxid, error, move(data));
+}
+
+template <typename T>
+unique_ptr<T> from_reply_payload_vector(string client, string server, int xid, long zxid, int error, const string& payload)
+{
+  // xid(int) + zxid(long) + error(int) + vector(int + strs)
+  CHECK_LENGTH(payload, 16);
+
+  if (error) {
+    return make_unique<T>(move(client), move(server), xid, zxid, error);
+  }
+
+  CHECK_LENGTH(payload, 20);
+  auto vec = read_vector(payload, 20);
+
+  return make_unique<T>(move(client), move(server), xid, zxid, error, move(vec.first));
+}
+
+template <typename T>
+unique_ptr<T> from_reply_payload_vector_stat(string client, string server, int xid, long zxid, int error, const string& payload)
+{
+  // xid(int) + zxid(long) + error(int) + vector(int + strs) + stat(68)
+  CHECK_LENGTH(payload, 16);
+
+  if (error) {
+    return make_unique<T>(move(client), move(server), xid, zxid, error);
+  }
+
+  CHECK_LENGTH(payload, 20);
+  auto vec = read_vector(payload, 20);
+  auto stat = read_stat(payload, vec.second);
+
+  return make_unique<T>(move(client), move(server), xid, zxid, error, move(vec.first), move(stat));
 }
 
 } // namespace
@@ -249,21 +333,21 @@ unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(string client, string 
   case enumToInt(Opcodes::GETDATA):
     return from_reply_payload_data_stat<GetReply>(move(client), move(server), xid, zxid, error, payload);
   case enumToInt(Opcodes::CREATE):
-    break;
+    return from_reply_payload_data<CreateReply>(move(client), move(server), xid, zxid, error, payload);
   case enumToInt(Opcodes::CREATE2):
-    break;
+    return from_reply_payload_data_stat<CreateReply>(move(client), move(server), xid, zxid, error, payload);
   case enumToInt(Opcodes::SETDATA):
-    break;
+    return from_reply_payload_stat<SetReply>(move(client), move(server), xid, zxid, error, payload);
   case enumToInt(Opcodes::GETCHILDREN):
-    break;
+    return from_reply_payload_vector<GetChildrenReply>(move(client), move(server), xid, zxid, error, payload);
   case enumToInt(Opcodes::GETCHILDREN2):
-    break;
+    return from_reply_payload_vector_stat<GetChildrenReply>(move(client), move(server), xid, zxid, error, payload);
   case enumToInt(Opcodes::DELETE):
-    break;
+    return make_unique<DeleteReply>(move(client), move(server), xid, zxid, error);
   case enumToInt(Opcodes::SYNC):
-    break;
+    return from_reply_payload_data<SyncReply>(move(client), move(server), xid, zxid, error, payload);
   case enumToInt(Opcodes::EXISTS):
-    break;
+    return from_reply_payload_stat<ExistsReply>(move(client), move(server), xid, zxid, error, payload);
   default:
     break;
   }
@@ -314,6 +398,7 @@ unique_ptr<CreateRequest> CreateRequest::from_payload(string client, string serv
   CHECK_LENGTH(payload, 25);
 
   int xid = read_number(payload, 4);
+  int opcode = read_number(payload, 8);
   string path = read_buffer(payload, 12);
   int data_len = read_number(payload, 16 + path.length());
   auto acls_rv = read_acls(payload, 20 + path.length() + data_len);
@@ -323,7 +408,7 @@ unique_ptr<CreateRequest> CreateRequest::from_payload(string client, string serv
   bool sequence = (flags & 0x2) == 2;
 
   return make_unique<CreateRequest>(move(client), move(server), xid, move(path),
-    ephemeral, sequence, move(acls));
+    ephemeral, sequence, move(acls), opcode);
 }
 
 }
