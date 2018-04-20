@@ -639,7 +639,7 @@ public:
     ZKClientMessage(move(client), move(server), xid, move(path)),
     ephemeral_(ephemeral), sequence_(sequence), acls_(move(acls)), opcode_(opcode) {};
 
-  static std::unique_ptr<CreateRequest> from_payload(string, string, const string&, int);
+  static std::unique_ptr<CreateRequest> from_payload(string, string, const string&);
 
   operator std::string() const {
     auto ephemeral = ephemeral_ ? "true" : "false";

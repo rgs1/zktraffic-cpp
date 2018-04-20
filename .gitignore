@@ -33,3 +33,6 @@
 *~
 zkdump
 
+# Bazel
+bazel-*
+.bazelrc
