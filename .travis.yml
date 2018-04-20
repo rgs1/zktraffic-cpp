@@ -12,6 +12,7 @@ matrix:
             - ubuntu-toolchain-r-test
           packages:
             - g++-7
+            - libpcap-dev
       env:
         - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
         - V=0.12.0
@@ -36,7 +37,7 @@ before_install:
   - rm -f install.sh
 
 script:
-  - bazel build //src:zkdump
+  - bazel build -s //src:zkdump
 
 notifications:
   email: false
