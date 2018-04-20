@@ -40,6 +40,48 @@ enum class Opcodes {
   SETWATCHES = 101
 };
 
+class ZnodeStat {
+public:
+  ZnodeStat(long long czxid, long long mzxid, unsigned long long ctime, unsigned long long mtime,
+    int version, int cversion, int aversion, long long ephemeralOwner,
+    int dataLength, int numChildren, long long pzxid) :
+    czxid_(czxid), mzxid_(mzxid), ctime_(ctime), mtime_(mtime),
+    version_(version), cversion_(cversion), aversion_(aversion),
+    ephemeralOwner_(ephemeralOwner), dataLength_(dataLength),
+    numChildren_(numChildren), pzxid_(pzxid) {}
+
+  operator std::string() const {
+    stringstream ss;
+    ss << "Stat(" <<
+      "czxid=" << czxid_ << "," <<
+      "mzxid=" << mzxid_ << "," <<
+      "ctime=" << ctime_ << "," <<
+      "mtime=" << mtime_ << "," <<
+      "version=" << version_ << "," <<
+      "cversion=" << cversion_ << "," <<
+      "aversion=" << aversion_ << "," <<
+      "ephemeralOwner=" << ephemeralOwner_ << "," <<
+      "dataLength=" << dataLength_ << "," <<
+      "numChildren=" << numChildren_ << "," <<
+      "pzxid=" << pzxid_ <<
+      ")";
+    return ss.str();
+  }
+
+protected:
+  long long czxid_;
+  long long mzxid_;
+  unsigned long long ctime_;
+  unsigned long long mtime_;
+  int version_;
+  int cversion_;
+  int aversion_;
+  long long ephemeralOwner_;
+  int dataLength_;
+  int numChildren_;
+  long long pzxid_;
+};
+
 class Acl {
 public:
   Acl(int perms, string scheme, string credential) :
@@ -160,6 +202,7 @@ protected:
     ss << req << "(\n" <<
       "  client=" << client_ << "\n" <<
       "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
       "  path=" << path_ << "\n" <<
       "  watch=" << watch_ << "\n" <<
       ")\n";
@@ -208,6 +251,41 @@ public:
     ZKServerMessage(move(client), move(server), PING_XID, zxid, error) {};
 
   operator std::string() const { return reply("PingReply"); }
+};
+
+class GetReply : public ZKServerMessage {
+public:
+  GetReply(string client, string server, int xid, long long zxid, int error) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+    data_(nullptr), stat_(nullptr) {};
+
+  GetReply(string client, string server, int xid, long long zxid, int error,
+    string data, unique_ptr<ZnodeStat> stat) :
+    ZKServerMessage(move(client), move(server), xid, zxid, error),
+	data_(move(data)), stat_(move(stat)) {};
+
+  operator std::string() const {
+    auto& data = error_ ? "" : data_;
+    string stat = "";
+    if (!error_)
+      stat = *stat_.get();
+    stringstream ss;
+    ss << "GetReply(\n" <<
+      "  client=" << client_ << "\n" <<
+      "  server=" << server_ << "\n" <<
+      "  xid=" << xid_ << "\n" <<
+      "  zxid=" << zxid_ << "\n" <<
+      "  error=" << error_ << "\n" <<
+      "  data=" << data << "\n" <<
+      "  stat=" << stat << "\n" <<
+      ")\n";
+
+    return ss.str();
+  }
+
+private:
+  string data_;
+  unique_ptr<ZnodeStat> stat_;
 };
 
 enum class EventType {

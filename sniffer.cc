@@ -72,13 +72,14 @@ void Sniffer::packetHandler(const struct pcap_pkthdr* header,  const u_char *pac
     if (message != nullptr) {
       auto client_msg = dynamic_cast<ZKClientMessage *>(message.get());
       // TODO: check for max msgs
-      requests_.emplace(client_msg->xid(), client_msg->opcode());
+      if (client_msg->xid() != PING_XID)
+	requests_.emplace(client_msg->xid(), client_msg->opcode());
     }
   } else {
     auto server = tcpp->src();
     auto client = tcpp->dst();
     message = ZKServerMessage::from_payload(move(client), move(server), tcpp->payload(), requests_);
-    if (message != nullptr)
+    if (message != nullptr && message->xid() != PING_XID)
       requests_.erase(message->xid());
   }
 

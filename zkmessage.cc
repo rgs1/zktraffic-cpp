@@ -26,16 +26,34 @@ int read_number(const string& data, unsigned int offset) {
   return number;
 }
 
+string to_bits(char c) {
+  stringstream ss;
+
+  for (int i =7; i >= 0; i-- ) {
+    int bit = c & (1 << i) ? 1 : 0;
+    ss << bit;
+  }
+
+  return ss.str();
+}
+
+void dump(const string& payload) {
+  for (unsigned int i=0; i<payload.length(); i++)
+    cout << "payload[" << i << "] = " << to_bits(payload[i]) << "\n";
+}
+
 long long read_long(const string& data, int offset) {
   auto n = data.substr(offset, 8);
-  long long number = ((unsigned long long)n[7]<<0) | \
-    ((unsigned long long)n[6]<<8) | \
-    ((unsigned long long)n[5]<<16) | \
-    ((unsigned long long)n[4]<<24) | \
-    ((unsigned long long)n[3]<<32) | \
-    ((unsigned long long)n[2]<<40) | \
-    ((unsigned long long)n[1]<<48) | \
-    ((unsigned long long)n[0]<<56);
+
+  // careful when casting, watch out for 2's complement
+  unsigned long long number = ((unsigned long long)(unsigned char)n[7]<<0) |	\
+    ((unsigned long long)(unsigned char)n[6]<<8) | \
+    ((unsigned long long)(unsigned char)n[5]<<16) | \
+    ((unsigned long long)(unsigned char)n[4]<<24) | \
+    ((unsigned long long)(unsigned char)n[3]<<32) | \
+    ((unsigned long long)(unsigned char)n[2]<<40) | \
+    ((unsigned long long)(unsigned char)n[1]<<48) | \
+    ((unsigned long long)(unsigned char)n[0]<<56);
 
   return number;
 }
@@ -124,12 +142,40 @@ unique_ptr<T> from_payload_path(string client, string server, const string& payl
   return make_unique<T>(move(client), move(server), xid, move(path));
 }
 
-/*
-void dump_payload(const string& payload) {
-  for (unsigned int i=0; i<payload.length(); i++)
-    cout << "payload[" << i << "] = " << payload[i] << "\n";
+unique_ptr<ZnodeStat> read_stat(const string& payload, unsigned int offset) {
+  long long czxid = read_long(payload, offset);
+  long long mzxid = read_long(payload, offset + 8);
+  long long ctime = read_long(payload, offset + 16);
+  long long mtime = read_long(payload, offset + 24);
+  int version = read_number(payload, offset + 32);
+  int cversion = read_number(payload, offset + 36);
+  int aversion = read_number(payload, offset + 40);
+  long long ephemeralOwner = read_long(payload, offset + 44);
+  int dataLength = read_number(payload, offset + 52);
+  int numChildren = read_number(payload, offset + 56);
+  long long pzxid = read_long(payload, offset + 60);
+
+  return make_unique<ZnodeStat>(czxid, mzxid, ctime, mtime,
+    version, cversion, aversion, ephemeralOwner, dataLength, numChildren, pzxid);
 }
-*/
+
+template <typename T>
+unique_ptr<T> from_reply_payload_data_stat(string client, string server, int xid, long zxid, int error, const string& payload)
+{
+  // xid(int) + zxid(long) + error(int) + data(int + str) + stat(68)
+  CHECK_LENGTH(payload, 16);
+
+  if (error) {
+    return make_unique<T>(move(client), move(server), xid, zxid, error);
+  }
+
+  CHECK_LENGTH(payload, 88);
+
+  auto data = read_buffer(payload, 20);
+  auto stat = read_stat(payload, 24 + data.length());
+
+  return make_unique<T>(move(client), move(server), xid, zxid, error, move(data), move(stat));
+}
 
 } // namespace
 
@@ -196,8 +242,30 @@ unique_ptr<ZKServerMessage> ZKServerMessage::from_payload(string client, string 
 
   // handle responses from seen requests
   auto opcode = requests.find(xid);
-  if (opcode != requests.end()) {
-    cout << "got a reply for " << opcode_to_name(opcode->second) << "\n";
+  if (opcode == requests.end())
+    return nullptr;
+
+  switch (opcode->second) {
+  case enumToInt(Opcodes::GETDATA):
+    return from_reply_payload_data_stat<GetReply>(move(client), move(server), xid, zxid, error, payload);
+  case enumToInt(Opcodes::CREATE):
+    break;
+  case enumToInt(Opcodes::CREATE2):
+    break;
+  case enumToInt(Opcodes::SETDATA):
+    break;
+  case enumToInt(Opcodes::GETCHILDREN):
+    break;
+  case enumToInt(Opcodes::GETCHILDREN2):
+    break;
+  case enumToInt(Opcodes::DELETE):
+    break;
+  case enumToInt(Opcodes::SYNC):
+    break;
+  case enumToInt(Opcodes::EXISTS):
+    break;
+  default:
+    break;
   }
 
   return nullptr;
