@@ -1,4 +1,4 @@
-# zktraffic-cpp
+# zktraffic-cpp [![Build Status](https://travis-ci.org/rgs1/zktraffic-cpp.svg?branch=master)](https://travis-ci.org/rgs1/zktraffic-cpp)
 
 **Table of Contents**
 
