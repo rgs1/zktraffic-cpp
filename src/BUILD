@@ -18,6 +18,7 @@ cc_library(
         "tcp_packet.h",
         "zkmessage.h",
     ],
+    visibility = ["//test:__pkg__"],
 )
 
 cc_binary(

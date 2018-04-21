@@ -38,6 +38,7 @@ before_install:
 
 script:
   - bazel build -s //src:zkdump
+  - bazel test --cache_test_results=no test:*
 
 notifications:
   email: false

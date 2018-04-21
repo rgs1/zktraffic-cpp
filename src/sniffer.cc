@@ -16,40 +16,55 @@ void Sniffer::run() {
   pcap_t *handle;
   struct bpf_program fp;
 
-  handle = pcap_open_live(iface_.c_str(), 8192, 1, 1000, errbuf);
+  stopped_ = false;
+
+  if (from_file_)
+    handle = pcap_open_offline(iface_.c_str(), errbuf);
+  else
+    handle = pcap_open_live(iface_.c_str(), 8192, 1, 1000, errbuf);
+
   if (handle == NULL) {
-    cout << "couldn't sniff (iface: " << iface_ << "): " << errbuf << "\n";
+    if (from_file_)
+      cout << "couldn't sniff (file: " << iface_ << "): " << errbuf << "\n";
+    else
+      cout << "couldn't sniff (iface: " << iface_ << "): " << errbuf << "\n";
+    stopped_ = true;
     return;
   }
 
-  // cout << "datalink type: " << pcap_datalink(handle) << "\n";
-
   if (pcap_compile(handle, &fp, filter_.c_str(), 0, PCAP_NETMASK_UNKNOWN) == -1) {
     cout << "couldn't compile the filter (iface: " << iface_ << ")\n";
+    stopped_ = true;
     return;
   }
 
   if (pcap_setfilter(handle, &fp) == -1) {
     cout << "couldn't set the filter (iface: " << iface_ << ")\n";
+    stopped_ = true;
     return;
   }
 
-  cout << "running (iface: " << iface_ << ")\n";
-  running_ = true;
+  if (from_file_)
+    cout << "running (file: " << iface_ << ")\n";
+  else
+    cout << "running (iface: " << iface_ << ")\n";
 
+  running_ = true;
   runner_ = new thread([this, handle]() {
       const u_char *packet;
       struct pcap_pkthdr header;
 
       while (running_) {
 	packet = pcap_next(handle, &header);
+	if (packet == nullptr)
+	  break;
 	packetHandler(&header, packet);
       }
-
+      cout << "exiting sniffing loop...\n";
       pcap_close(handle);
+      stopped_ = true;
     });
-
-  // TODO: when is join() called?
+  runner_->detach();
 }
 
 void Sniffer::stop() {

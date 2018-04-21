@@ -68,6 +68,8 @@ public:
     return ss.str();
   }
 
+  int dataLength() const { return dataLength_; }
+
 protected:
   long long czxid_;
   long long mzxid_;
@@ -108,8 +110,8 @@ private:
 };
 
 template <typename T>
-constexpr uint32_t enumToInt(T val) {
-  return static_cast<uint32_t>(val);
+constexpr int enumToInt(T val) {
+  return static_cast<int>(val);
 }
 
 class ZKMessage {
@@ -332,6 +334,7 @@ public:
       stat = *stat_.get();
     return reply_data_stat("GetReply", "data", data, stat);
   }
+  const string& data() const { return data_; }
 
 private:
   string data_;
@@ -390,6 +393,8 @@ public:
     return reply_vec_stat(name, "children", children_, stat);
   }
 
+  const vector<string>& children() const { return children_; }
+
 private:
   vector<string> children_{};
   unique_ptr<ZnodeStat> stat_;
@@ -403,6 +408,8 @@ public:
   SetReply(string client, string server, int xid, long long zxid, int error,
     unique_ptr<ZnodeStat> stat) :
     ZKServerMessage(move(client), move(server), xid, zxid, error), stat_(move(stat)) {};
+
+  const ZnodeStat& stat() const { return *stat_.get(); }
 
   operator std::string() const {
     string stat = "";

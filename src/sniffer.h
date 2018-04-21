@@ -18,9 +18,9 @@ namespace Zktraffic {
 
 class Sniffer {
 public:
-  Sniffer(const std::string iface, const std::string filter)
-    : iface_(iface), filter_(filter), running_(false) {
-  }
+  Sniffer(const std::string iface, const std::string filter, bool from_file=false)
+      : iface_(iface), filter_(filter), from_file_(from_file), running_(false),
+	stopped_(false) {}
   void run();
   void stop();
   std::unique_ptr<ZKMessage> get() {
@@ -32,12 +32,19 @@ public:
       queue_.pop();
       return rv;
   }
+  bool empty() {
+      unique_lock<mutex> guard(mutex_);
+      return queue_.empty();
+  }
+  bool stopped() const { return stopped_; }
 
 private:
   void packetHandler(const struct pcap_pkthdr* header,  const u_char *packet);
   std::string iface_;
   std::string filter_;
+  bool from_file_;
   volatile bool running_;
+  volatile bool stopped_;
   thread *runner_;
   queue<unique_ptr<ZKMessage>> queue_;
   mutex mutex_;
