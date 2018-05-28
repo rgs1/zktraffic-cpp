@@ -26,13 +26,13 @@ public:
   string src() const {
     stringstream ss;
     ss << src_ip_ << ":" << src_port_;
-    return move(ss.str());
+    return ss.str();
   }
 
   string dst() {
     stringstream ss;
     ss << dst_ip_ << ":" << dst_port_;
-    return move(ss.str());
+    return ss.str();
   }
 
 private:
